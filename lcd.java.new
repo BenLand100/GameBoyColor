@@ -1,0 +1,213 @@
+package gameboy;
+
+import gameboy.memory.RamPage;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import javax.swing.ImageIcon;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+
+/**
+ *
+ * @author benland100
+ */
+public class LCD extends JFrame {
+
+    private static final int buff_w = 256;
+    private static final int buff_h = 256;
+    private static final int scrn_w = 160;
+    private static final int scrn_h = 144;
+
+    BufferedImage map_0_a = new BufferedImage(buff_h,buff_w,BufferedImage.TYPE_INT_RGB);
+    int[] buffer_0_a = new int[buff_h*buff_w];
+    BufferedImage map_0_b = new BufferedImage(buff_h,buff_w,BufferedImage.TYPE_INT_RGB);
+    int[] buffer_0_b = new int[buff_h*buff_w];
+    BufferedImage map_1_a = new BufferedImage(buff_h,buff_w,BufferedImage.TYPE_INT_RGB);
+    int[] buffer_1_a = new int[buff_h*buff_w];
+    BufferedImage map_1_b = new BufferedImage(buff_h,buff_w,BufferedImage.TYPE_INT_RGB);
+    int[] buffer_1_b = new int[buff_h*buff_w];
+    BufferedImage screen = new BufferedImage(scrn_w,scrn_h,BufferedImage.TYPE_INT_RGB);
+    RamPage vram;
+    IOPorts ports;
+
+    public LCD(RamPage vram, IOPorts ports) {
+        super("GameBoy Color Emulator");
+        this.vram = vram;
+        this.ports = ports;
+        add(new JLabel(new ImageIcon(screen)));
+        pack();
+        setVisible(true);
+        this.setAlwaysOnTop(true);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+    }
+
+    public static final int[] SHADES_OF_GREY = new int[] { 0xFFFFFF, 0xAAAAAA, 0x555555, 0x000000 };
+    public static final int[] BLANK_LINE = new int[160];
+    static {
+        for (int i = 0; i < 160; i++) BLANK_LINE[i] = 0xFFFFFF;
+    }
+
+
+    public void renderLine(int line) {
+        int ctrl = ports.LCD_CTRL;
+        if ((ctrl & 0x80) == 0) {
+            screen.setRGB(0, line, scrn_w, 1, BLANK_LINE, 0, scrn_w);
+        } else {
+
+            int[] shades = new int[4];
+            int reg = ports.LCD_BGP;
+            for (int i = 0; i < 4; i++) {
+                shades[i] = SHADES_OF_GREY[(reg >> (i*2)) & 0x3];
+            }
+
+            if ((ctrl & 0x01) != 0) {
+                int bgx = ports.LCD_SCX;
+                int bgy = (ports.LCD_SCY + line) % buff_h;
+
+                int[] line_colors = new int[buff_w];
+                if ((ctrl & 0x10) == 0) {
+                    if ((ctrl & 0x08) == 0) {
+                        for (int i = 0; i < buff_w; i++) {
+                            line_colors[i] = shades[0x3 & buffer_0_a[i+buff_w*bgy]];
+                        }
+                    } else {
+                        for (int i = 0; i < buff_w; i++) {
+                            line_colors[i] = shades[0x3 & buffer_0_b[i+buff_w*bgy]];
+                        }
+                    }
+                } else {
+                    if ((ctrl & 0x08) == 0) {
+                        for (int i = 0; i < buff_w; i++) {
+                            line_colors[i] = shades[0x3 & buffer_1_a[i+buff_w*bgy]];
+                        }
+                    } else {
+                        for (int i = 0; i < buff_w; i++) {
+                            line_colors[i] = shades[0x3 & buffer_1_b[i+buff_w*bgy]];
+                        }
+                    }
+                }
+
+                int w = buff_w - bgx;
+                if (w >= scrn_w) {
+                    screen.setRGB(0, line, scrn_w, 1, line_colors, bgx, buff_w);
+                } else {
+                    screen.setRGB(0, line, w, 1, line_colors, bgx, buff_w);
+                    screen.setRGB(w, line, scrn_w - w, 1, line_colors, 0, buff_w);
+                }
+            }
+            if ((ctrl & 0x20) != 0) {
+                int wx = ports.LCD_WX;
+                int wy = ports.LCD_WY;
+                if (line >= wy) {
+                    wy -= line;
+                    int[] line_colors = new int[buff_w];
+                    if ((ctrl & 0x10) == 0) {
+                        if ((ctrl & 0x08) == 0) {
+                            for (int i = 0; i < buff_w; i++) {
+                                line_colors[i] = shades[0x3 & buffer_0_a[i+buff_w*wy]];
+                            }
+                        } else {
+                            for (int i = 0; i < buff_w; i++) {
+                                line_colors[i] = shades[0x3 & buffer_0_b[i+buff_w*wy]];
+                            }
+                        }
+                    } else {
+                        if ((ctrl & 0x08) == 0) {
+                            for (int i = 0; i < buff_w; i++) {
+                                line_colors[i] = shades[0x3 & buffer_1_a[i+buff_w*wy]];
+                            }
+                        } else {
+                            for (int i = 0; i < buff_w; i++) {
+                                line_colors[i] = shades[0x3 & buffer_1_b[i+buff_w*wy]];
+                            }
+                        }
+                    }
+
+                    screen.setRGB(wx, line, scrn_w - wx, 1, line_colors, 0, buff_w);
+
+                }
+            }
+        }
+    }
+
+    public void gatherData() {
+        repaint();
+        int[][] tiles_a = new int[32][32];
+        int[][] tiles_b = new int[32][32];
+        for (int i = 0; i < 32*32; i++) {
+            tiles_a[i%32][i/32] = vram.readB(0x1800+i);
+            tiles_b[i%32][i/32] = vram.readB(0x1C00+i);
+        }
+        int[] tile_0_a = new int[64];
+        int[] tile_0_b = new int[64];
+        int[] tile_1_a = new int[64];
+        int[] tile_1_b = new int[64];
+        for (int x = 0; x < 32; x++) {
+            for (int y = 0; y < 32; y++) {
+                int pos_a = (tiles_a[x][y]) * 16;
+                int pos_b = ((byte)tiles_b[x][y]) * 16;
+                int m = 0;
+                int n = 0;
+                int o = 0;
+                int p = 0;
+                for (int i = 0; i < 16; ) {
+                    int h_a_0 = vram.readB(pos_a + (i));
+                    int h_a_1 = vram.readB(0x1000 +pos_a + (i));
+                    int h_b_0 = vram.readB(pos_b + (i));
+                    int h_b_1 = vram.readB(0x1000 +pos_b + (i++));
+                    int l_a_0 = vram.readB(pos_a + (i));
+                    int l_a_1 = vram.readB(0x1000 +pos_a + (i));
+                    int l_b_0 = vram.readB(pos_b + (i));
+                    int l_b_1 = vram.readB(0x1000 +pos_b + (i++));
+
+                    tile_0_a[m++] = ((h_a_0 >> 7) & 1) | ((l_a_0 >> 6) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 6) & 1) | ((l_a_0 >> 5) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 5) & 1) | ((l_a_0 >> 4) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 4) & 1) | ((l_a_0 >> 3) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 3) & 1) | ((l_a_0 >> 2) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 2) & 1) | ((l_a_0 >> 1) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 1) & 1) | ((l_a_0 >> 0) & 2);
+                    tile_0_a[m++] = ((h_a_0 >> 0) & 1) | ((l_a_0 << 1) & 2);
+
+                    tile_0_b[n++] = ((h_b_0 >> 7) & 1) | ((l_b_0 >> 6) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 6) & 1) | ((l_b_0 >> 5) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 5) & 1) | ((l_b_0 >> 4) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 4) & 1) | ((l_b_0 >> 3) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 3) & 1) | ((l_b_0 >> 2) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 2) & 1) | ((l_b_0 >> 1) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 1) & 1) | ((l_b_0 >> 0) & 2);
+                    tile_0_b[n++] = ((h_b_0 >> 0) & 1) | ((l_b_0 << 1) & 2);
+
+                    tile_1_a[o++] = ((h_a_1 >> 7) & 1) | ((l_a_1 >> 6) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 6) & 1) | ((l_a_1 >> 5) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 5) & 1) | ((l_a_1 >> 4) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 4) & 1) | ((l_a_1 >> 3) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 3) & 1) | ((l_a_1 >> 2) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 2) & 1) | ((l_a_1 >> 1) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 1) & 1) | ((l_a_1 >> 0) & 2);
+                    tile_1_a[o++] = ((h_a_1 >> 0) & 1) | ((l_a_1 << 1) & 2);
+
+                    tile_1_b[p++] = ((h_b_1 >> 7) & 1) | ((l_b_1 >> 6) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 6) & 1) | ((l_b_1 >> 5) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 5) & 1) | ((l_b_1 >> 4) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 4) & 1) | ((l_b_1 >> 3) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 3) & 1) | ((l_b_1 >> 2) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 2) & 1) | ((l_b_1 >> 1) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 1) & 1) | ((l_b_1 >> 0) & 2);
+                    tile_1_b[p++] = ((h_b_1 >> 0) & 1) | ((l_b_1 << 1) & 2);
+
+                }
+                map_0_a.setRGB(x*8, y*8, 8, 8, tile_0_a, 0, 8);
+                map_1_a.setRGB(x*8, y*8, 8, 8, tile_1_a, 0, 8);
+                map_0_a.setRGB(x*8, y*8, 8, 8, tile_0_b, 0, 8);
+                map_1_b.setRGB(x*8, y*8, 8, 8, tile_1_b, 0, 8);
+            }
+        }
+        map_0_a.getRGB(0, 0, buff_w, buff_h, buffer_0_a, 0, buff_w);
+        map_1_a.getRGB(0, 0, buff_w, buff_h, buffer_1_a, 0, buff_w);
+        map_0_b.getRGB(0, 0, buff_w, buff_h, buffer_0_b, 0, buff_w);
+        map_1_b.getRGB(0, 0, buff_w, buff_h, buffer_1_b, 0, buff_w);
+    }
+
+}
+
